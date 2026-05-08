@@ -1,6 +1,6 @@
 import { ponder, Context } from 'ponder:registry';
 import { CommonEcosystem, TransferReference } from 'ponder:schema';
-import { Address, Hash } from 'viem';
+import { Address, Hash, zeroAddress } from 'viem';
 import { normalizeAddress } from './utils/format';
 
 /*
@@ -109,29 +109,49 @@ ponder.on(
 	}
 );
 
-// CCIP MessageSent event topic
-const CCIP_SENT_TOPIC = '0xd0c3c799bf9e2639de44391e7f524d229b2b55f5b1ea94b2bf7da42f7243dddd';
+// CCIPSendRequested (CCIP v1) — recipient at ABI slot index 3
+const CCIPSendRequested = '0xd0c3c799bf9e2639de44391e7f524d229b2b55f5b1ea94b2bf7da42f7243dddd';
+// CCIPMessageSent (CCIP v1.5+) — recipient at ABI slot index 6
+const CCIPMessageSent = '0x192442a2b2adb6a7948f097023cb6b57d29d3a7a5dd33e6666d33c39cc456f32';
 
-// @dev: this will try to get the target address from the CCIP event topic instead of using the encoded bytes of keccak256(address)
+// @dev: extracts the recipient address from the CCIP event in the same transaction;
+// supports both CCIPSendRequested (v1, slot 3) and CCIPMessageSent (v1.5+, slot 6)
 async function getTargetAddress(client: Context['client'], hash: Hash): Promise<Address> {
 	const tx = await client.getTransactionReceipt({ hash });
-	const data = tx.logs.find((i) => i.topics.includes(CCIP_SENT_TOPIC as never));
 
-	if (!data || !data.data) {
-		throw new Error(`CCIP MessageSent event not found in transaction ${hash}`);
+	let slotIndex: number | undefined;
+	let logData: string | undefined;
+
+	for (const log of tx.logs) {
+		if (log.topics.includes(CCIPSendRequested as never)) {
+			slotIndex = 3;
+			logData = log.data;
+			break;
+		}
+		if (log.topics.includes(CCIPMessageSent as never)) {
+			slotIndex = 6;
+			logData = log.data;
+			break;
+		}
 	}
 
-	// Offset calculation: 2 (0x prefix) + 64*3 (3 slots of 32 bytes) + 24 (padding)
-	const offset = 2 + 64 * 3 + 24;
+	if (slotIndex === undefined || !logData) {
+		console.warn(`No CCIP event found in transaction ${hash}, storing zero address`);
+		return zeroAddress;
+	}
+
+	// 2 (0x prefix) + 64*slotIndex (skip preceding 32-byte slots) + 24 (12-byte zero padding before address)
+	const offset = 2 + 64 * slotIndex + 24;
 	const addressLength = 40;
 
-	if (data.data.length < offset + addressLength) {
-		throw new Error(`Insufficient data in CCIP event for transaction ${hash}: expected at least ${offset + addressLength} chars, got ${data.data.length}`);
+	if (logData.length < offset + addressLength) {
+		throw new Error(
+			`Insufficient data in CCIP event for transaction ${hash}: expected at least ${offset + addressLength} chars, got ${logData.length}`
+		);
 	}
 
-	const extracted = data.data.slice(offset, offset + addressLength);
+	const extracted = logData.slice(offset, offset + addressLength);
 
-	// Validate extracted address format
 	if (!/^[0-9a-fA-F]{40}$/.test(extracted)) {
 		throw new Error(`Invalid address extracted from CCIP data in transaction ${hash}: ${extracted}`);
 	}
