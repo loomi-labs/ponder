@@ -1,17 +1,50 @@
-import { ERC20ABI } from '@frankencoin/zchf';
-import { ponder } from 'ponder:registry';
+import { ADDRESS, ERC20ABI } from '@frankencoin/zchf';
+import { Context, ponder } from 'ponder:registry';
 import {
 	CommonEcosystem,
 	MintingHubV2ChallengeBidV2,
 	MintingHubV2ChallengeV2,
-	MintingHubV2OwnerTransfersV2,
 	MintingHubV2PositionV2,
 	MintingHubV2Status,
 } from 'ponder:schema';
 import { normalizeAddress } from './utils/format';
+import { Address } from 'viem';
+import { mainnet } from 'viem/chains';
 
+const CLONE_HELPER = normalizeAddress(ADDRESS[mainnet.id].cloneHelper);
 // keccak256("OwnershipTransferred(address,address)")
-const OWNERSHIP_TRANSFERRED_TOPIC = '0x8be0079c531659141344cd1fd0a4f28419497f9722a3daafe3b4186f6b6457e0';
+const OWNERSHIP_TRANSFERRED_TOPIC = '0x8be0079c531659141344cd1fd0a4f28419497f9722a3daafe3b4186f6b6457e0' as const;
+
+/**
+ * If a MintingUpdate originates from a CloneHelper tx, the position's owner in the DB is still
+ * the CloneHelper (the 0x0→CloneHelper OwnershipTransferred log was already processed, but the
+ * CloneHelper→beneficiary transfer log comes later in the same tx).
+ * We fetch the receipt and find that second transfer to recover the actual beneficiary.
+ */
+async function resolvePositionOwner(
+	owner: Address,
+	positionAddress: Address,
+	txHash: `0x${string}`,
+	client: Context['client']
+): Promise<Address> {
+	if (owner !== CLONE_HELPER) return owner;
+
+	const receipt = await client.getTransactionReceipt({ hash: txHash });
+
+	for (const log of receipt.logs) {
+		if (
+			normalizeAddress(log.address) === positionAddress &&
+			log.topics[0] === OWNERSHIP_TRANSFERRED_TOPIC &&
+			log.topics[1] !== undefined &&
+			log.topics[2] !== undefined &&
+			normalizeAddress(('0x' + log.topics[1].slice(26)) as Address) === CLONE_HELPER
+		) {
+			return normalizeAddress(('0x' + log.topics[2].slice(26)) as Address);
+		}
+	}
+
+	return owner;
+}
 
 /*
 Events
@@ -116,9 +149,18 @@ ponder.on('MintingHubV2:PositionOpened', async ({ event, context }) => {
 	// ------------------------------------------------------------------
 	// ------------------------------------------------------------------
 	// Create position entry for DB
+	// When a position is opened via CloneHelper, event.args.owner is still the
+	// CloneHelper address. Resolve to the actual beneficiary before storing.
+	const resolvedOwner = await resolvePositionOwner(
+		normalizeAddress(owner),
+		normalizeAddress(position),
+		event.transaction.hash,
+		client
+	);
+
 	await context.db.insert(MintingHubV2PositionV2).values({
 		position: normalizeAddress(position),
-		owner,
+		owner: resolvedOwner,
 		zchf,
 		collateral,
 		price,
@@ -154,74 +196,6 @@ ponder.on('MintingHubV2:PositionOpened', async ({ event, context }) => {
 		availableForMinting,
 		minted,
 	});
-
-	// ------------------------------------------------------------------
-	// BACKFILL ATOMIC OWNERSHIP TRANSFERS
-	//
-	// `ponder start` (production) only begins watching a factory-discovered
-	// address after the PositionOpened log fires. Any OwnershipTransferred
-	// logs in the same transaction are therefore invisible to the
-	// PositionV2:OwnershipTransferred handler. We scan the full receipt here
-	// and insert every transfer atomically; the last one sets the owner.
-	{
-		const receipt = await client.getTransactionReceipt({ hash: event.transaction.hash });
-		const positionNorm = normalizeAddress(position);
-
-		let count = 0n;
-		let finalOwnerTopic: string | undefined;
-
-		for (const log of receipt.logs) {
-			const t1 = log.topics[1];
-			const t2 = log.topics[2];
-			if (
-				normalizeAddress(log.address) !== positionNorm ||
-				log.topics[0] !== OWNERSHIP_TRANSFERRED_TOPIC ||
-				!t1 ||
-				!t2
-			)
-				continue;
-
-			count++;
-			finalOwnerTopic = t2;
-
-			await context.db
-				.insert(MintingHubV2OwnerTransfersV2)
-				.values({
-					version: 2,
-					position: positionNorm,
-					count,
-					created: event.block.timestamp,
-					previousOwner: normalizeAddress('0x' + t1.slice(26)),
-					newOwner: normalizeAddress('0x' + t2.slice(26)),
-					txHash: event.transaction.hash,
-				})
-				.onConflictDoNothing();
-		}
-
-		if (count > 0n && finalOwnerTopic) {
-			const n = count;
-			// Upsert counter; take the max so dev-mode runs (where
-			// PositionV2:OwnershipTransferred already incremented it) are safe.
-			await context.db
-				.insert(MintingHubV2Status)
-				.values({
-					position: positionNorm,
-					ownerTransfersCounter: n,
-					mintingUpdatesCounter: 0n,
-					challengeStartedCounter: 0n,
-					challengeAvertedBidsCounter: 0n,
-					challengeSucceededBidsCounter: 0n,
-				})
-				.onConflictDoUpdate((current) => ({
-					ownerTransfersCounter: current.ownerTransfersCounter > n ? current.ownerTransfersCounter : n,
-				}));
-
-			// Correct the owner to the actual final recipient.
-			await context.db
-				.update(MintingHubV2PositionV2, { position: positionNorm })
-				.set({ owner: normalizeAddress('0x' + finalOwnerTopic.slice(26)) });
-		}
-	}
 
 	// ------------------------------------------------------------------
 	// COMMON
