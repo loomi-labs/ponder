@@ -4,10 +4,14 @@ import {
 	CommonEcosystem,
 	MintingHubV2ChallengeBidV2,
 	MintingHubV2ChallengeV2,
+	MintingHubV2OwnerTransfersV2,
 	MintingHubV2PositionV2,
 	MintingHubV2Status,
 } from 'ponder:schema';
 import { normalizeAddress } from './utils/format';
+
+// keccak256("OwnershipTransferred(address,address)")
+const OWNERSHIP_TRANSFERRED_TOPIC = '0x8be0079c531659141344cd1fd0a4f28419497f9722a3daafe3b4186f6b6457e0';
 
 /*
 Events
@@ -150,6 +154,77 @@ ponder.on('MintingHubV2:PositionOpened', async ({ event, context }) => {
 		availableForMinting,
 		minted,
 	});
+
+	// ------------------------------------------------------------------
+	// BACKFILL PRE-DISCOVERY OWNERSHIP TRANSFERS
+	//
+	// `ponder start` (production) only begins watching a factory-discovered
+	// address after the PositionOpened log fires. Any OwnershipTransferred
+	// logs that appear earlier in the same transaction are therefore invisible
+	// to the PositionV2:OwnershipTransferred handler.  We scan the receipt
+	// here and insert those records ourselves so the data is consistent
+	// between `ponder dev` and `ponder start`.
+	{
+		const receipt = await client.getTransactionReceipt({ hash: event.transaction.hash });
+		const positionNorm = normalizeAddress(position);
+
+		let count = 0n;
+		let finalOwnerTopic: string | undefined;
+
+		for (const log of receipt.logs) {
+			const t1 = log.topics[1];
+			const t2 = log.topics[2];
+			if (
+				normalizeAddress(log.address) !== positionNorm ||
+				log.topics[0] !== OWNERSHIP_TRANSFERRED_TOPIC ||
+				log.logIndex == null ||
+				log.logIndex >= event.log.logIndex ||
+				!t1 ||
+				!t2
+			)
+				continue;
+
+			count++;
+			finalOwnerTopic = t2;
+
+			await context.db
+				.insert(MintingHubV2OwnerTransfersV2)
+				.values({
+					version: 2,
+					position: positionNorm,
+					count,
+					created: event.block.timestamp,
+					previousOwner: normalizeAddress('0x' + t1.slice(26)),
+					newOwner: normalizeAddress('0x' + t2.slice(26)),
+					txHash: event.transaction.hash,
+				})
+				.onConflictDoNothing();
+		}
+
+		if (count > 0n && finalOwnerTopic) {
+			const n = count;
+			// Upsert counter; take the max so dev-mode runs (where
+			// PositionV2:OwnershipTransferred already incremented it) are safe.
+			await context.db
+				.insert(MintingHubV2Status)
+				.values({
+					position: positionNorm,
+					ownerTransfersCounter: n,
+					mintingUpdatesCounter: 0n,
+					challengeStartedCounter: 0n,
+					challengeAvertedBidsCounter: 0n,
+					challengeSucceededBidsCounter: 0n,
+				})
+				.onConflictDoUpdate((current) => ({
+					ownerTransfersCounter: current.ownerTransfersCounter > n ? current.ownerTransfersCounter : n,
+				}));
+
+			// Correct the owner to the actual final recipient.
+			await context.db
+				.update(MintingHubV2PositionV2, { position: positionNorm })
+				.set({ owner: normalizeAddress('0x' + finalOwnerTopic.slice(26)) });
+		}
+	}
 
 	// ------------------------------------------------------------------
 	// COMMON

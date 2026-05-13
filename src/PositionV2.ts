@@ -244,15 +244,18 @@ ponder.on('PositionV2:OwnershipTransferred', async ({ event, context }) => {
 		context.db.find(MintingHubV2PositionV2, { position: normalizeAddress(event.log.address) }),
 	]);
 
-	await context.db.insert(MintingHubV2OwnerTransfersV2).values({
-		version: 2,
-		position: normalizeAddress(event.log.address),
-		count: status.ownerTransfersCounter,
-		created: event.block.timestamp,
-		previousOwner: normalizeAddress(event.args.previousOwner),
-		newOwner: normalizeAddress(event.args.newOwner),
-		txHash: event.transaction.hash,
-	});
+	await context.db
+		.insert(MintingHubV2OwnerTransfersV2)
+		.values({
+			version: 2,
+			position: normalizeAddress(event.log.address),
+			count: status.ownerTransfersCounter,
+			created: event.block.timestamp,
+			previousOwner: normalizeAddress(event.args.previousOwner),
+			newOwner: normalizeAddress(event.args.newOwner),
+			txHash: event.transaction.hash,
+		})
+		.onConflictDoNothing();
 
 	if (position) {
 		await context.db
