@@ -156,14 +156,13 @@ ponder.on('MintingHubV2:PositionOpened', async ({ event, context }) => {
 	});
 
 	// ------------------------------------------------------------------
-	// BACKFILL PRE-DISCOVERY OWNERSHIP TRANSFERS
+	// BACKFILL ATOMIC OWNERSHIP TRANSFERS
 	//
 	// `ponder start` (production) only begins watching a factory-discovered
 	// address after the PositionOpened log fires. Any OwnershipTransferred
-	// logs that appear earlier in the same transaction are therefore invisible
-	// to the PositionV2:OwnershipTransferred handler.  We scan the receipt
-	// here and insert those records ourselves so the data is consistent
-	// between `ponder dev` and `ponder start`.
+	// logs in the same transaction are therefore invisible to the
+	// PositionV2:OwnershipTransferred handler. We scan the full receipt here
+	// and insert every transfer atomically; the last one sets the owner.
 	{
 		const receipt = await client.getTransactionReceipt({ hash: event.transaction.hash });
 		const positionNorm = normalizeAddress(position);
@@ -177,8 +176,6 @@ ponder.on('MintingHubV2:PositionOpened', async ({ event, context }) => {
 			if (
 				normalizeAddress(log.address) !== positionNorm ||
 				log.topics[0] !== OWNERSHIP_TRANSFERRED_TOPIC ||
-				log.logIndex == null ||
-				log.logIndex >= event.log.logIndex ||
 				!t1 ||
 				!t2
 			)
