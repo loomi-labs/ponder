@@ -1,5 +1,5 @@
-import { ADDRESS, ERC20ABI } from '@frankencoin/zchf';
-import { Context, ponder } from 'ponder:registry';
+import { ERC20ABI } from '@frankencoin/zchf';
+import { ponder } from 'ponder:registry';
 import {
 	CommonEcosystem,
 	MintingHubV2ChallengeBidV2,
@@ -8,43 +8,7 @@ import {
 	MintingHubV2Status,
 } from 'ponder:schema';
 import { normalizeAddress } from './utils/format';
-import { Address } from 'viem';
-import { mainnet } from 'viem/chains';
-
-const CLONE_HELPER = normalizeAddress(ADDRESS[mainnet.id].cloneHelper);
-// keccak256("OwnershipTransferred(address,address)")
-const OWNERSHIP_TRANSFERRED_TOPIC = '0x8be0079c531659141344cd1fd0a4f28419497f9722a3daafe3b4186f6b6457e0' as const;
-
-/**
- * If a MintingUpdate originates from a CloneHelper tx, the position's owner in the DB is still
- * the CloneHelper (the 0x0→CloneHelper OwnershipTransferred log was already processed, but the
- * CloneHelper→beneficiary transfer log comes later in the same tx).
- * We fetch the receipt and find that second transfer to recover the actual beneficiary.
- */
-async function resolvePositionOwner(
-	owner: Address,
-	positionAddress: Address,
-	txHash: `0x${string}`,
-	client: Context['client']
-): Promise<Address> {
-	if (owner !== CLONE_HELPER) return owner;
-
-	const receipt = await client.getTransactionReceipt({ hash: txHash });
-
-	for (const log of receipt.logs) {
-		if (
-			normalizeAddress(log.address) === positionAddress &&
-			log.topics[0] === OWNERSHIP_TRANSFERRED_TOPIC &&
-			log.topics[1] !== undefined &&
-			log.topics[2] !== undefined &&
-			normalizeAddress(('0x' + log.topics[1].slice(26)) as Address) === CLONE_HELPER
-		) {
-			return normalizeAddress(('0x' + log.topics[2].slice(26)) as Address);
-		}
-	}
-
-	return owner;
-}
+import { resolvePositionOwner } from './utils/ownership';
 
 /*
 Events
@@ -151,12 +115,7 @@ ponder.on('MintingHubV2:PositionOpened', async ({ event, context }) => {
 	// Create position entry for DB
 	// When a position is opened via CloneHelper, event.args.owner is still the
 	// CloneHelper address. Resolve to the actual beneficiary before storing.
-	const resolvedOwner = await resolvePositionOwner(
-		normalizeAddress(owner),
-		normalizeAddress(position),
-		event.transaction.hash,
-		client
-	);
+	const resolvedOwner = await resolvePositionOwner(normalizeAddress(owner), normalizeAddress(position), event.transaction.hash, client);
 
 	await context.db.insert(MintingHubV2PositionV2).values({
 		position: normalizeAddress(position),
