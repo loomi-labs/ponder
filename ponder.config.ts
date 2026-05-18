@@ -3,6 +3,7 @@ import { arbitrum, avalanche, base, gnosis, mainnet, optimism, polygon, sonic } 
 import { createPublicClient, erc20Abi, http } from 'viem';
 import {
 	ADDRESS,
+	CCIPAdminABI,
 	EquityABI,
 	FrankencoinABI,
 	MintingHubV1ABI,
@@ -389,6 +390,44 @@ export default createConfig({
 		},
 
 		// ### CROSS CHAIN SUPPORT ###
+
+		CCIPAdmin: {
+			abi: CCIPAdminABI,
+			chain: {
+				[mainnet.name]: {
+					address: addr[mainnet.id].ccipAdmin,
+					startBlock: config[mainnet.id].startCCIP,
+				},
+				[polygon.name]: {
+					address: addr[polygon.id].ccipAdmin,
+					startBlock: config[polygon.id].startBridgedFrankencoin,
+				},
+				[arbitrum.name]: {
+					address: addr[arbitrum.id].ccipAdmin,
+					startBlock: config[arbitrum.id].startBridgedFrankencoin,
+				},
+				[optimism.name]: {
+					address: addr[optimism.id].ccipAdmin,
+					startBlock: config[optimism.id].startBridgedFrankencoin,
+				},
+				[base.name]: {
+					address: addr[base.id].ccipAdmin,
+					startBlock: config[base.id].startBridgedFrankencoin,
+				},
+				[avalanche.name]: {
+					address: addr[avalanche.id].ccipAdmin,
+					startBlock: config[avalanche.id].startBridgedFrankencoin,
+				},
+				[gnosis.name]: {
+					address: addr[gnosis.id].ccipAdmin,
+					startBlock: config[gnosis.id].startBridgedFrankencoin,
+				},
+				[sonic.name]: {
+					address: addr[sonic.id].ccipAdmin,
+					startBlock: config[sonic.id].startBridgedFrankencoin,
+				},
+			},
+		},
 
 		CCIPBridgedAccounting: {
 			abi: BridgeAccountingABI,
