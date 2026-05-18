@@ -98,6 +98,8 @@ ponder.on('CCIPAdmin:ChainAdded', async ({ event, context }) => {
 });
 
 ponder.on('CCIPAdmin:ChainRemoved', async ({ event, context }) => {
+	const existing = await context.db.find(CCIPAdminChain, { chainId: context.chain.id, remoteChainSelector: BigInt(event.args.id) });
+	if (!existing) return;
 	await context.db
 		.update(CCIPAdminChain, { chainId: context.chain.id, remoteChainSelector: BigInt(event.args.id) })
 		.set({ active: false });
@@ -107,8 +109,12 @@ ponder.on('CCIPAdmin:ChainRemoved', async ({ event, context }) => {
 ponder.on('CCIPAdmin:RateLimit', async ({ event, context }) => {
 	const { remoteChain, inboundConfigs, outboundConfig } = event.args;
 	await context.db
-		.update(CCIPAdminChain, { chainId: context.chain.id, remoteChainSelector: BigInt(remoteChain) })
-		.set({
+		.insert(CCIPAdminChain)
+		.values({
+			chainId: context.chain.id,
+			remoteChainSelector: BigInt(remoteChain),
+			active: true,
+			remoteTokenAddress: null,
 			outboundEnabled: outboundConfig.isEnabled,
 			outboundCapacity: outboundConfig.capacity,
 			outboundRate: outboundConfig.rate,
@@ -116,5 +122,14 @@ ponder.on('CCIPAdmin:RateLimit', async ({ event, context }) => {
 			inboundCapacity: inboundConfigs.capacity,
 			inboundRate: inboundConfigs.rate,
 			rateLimitUpdatedAt: event.block.timestamp,
-		});
+		})
+		.onConflictDoUpdate(() => ({
+			outboundEnabled: outboundConfig.isEnabled,
+			outboundCapacity: outboundConfig.capacity,
+			outboundRate: outboundConfig.rate,
+			inboundEnabled: inboundConfigs.isEnabled,
+			inboundCapacity: inboundConfigs.capacity,
+			inboundRate: inboundConfigs.rate,
+			rateLimitUpdatedAt: event.block.timestamp,
+		}));
 });

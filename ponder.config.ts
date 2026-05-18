@@ -34,7 +34,7 @@ export const config = {
 		startMintingHubV2: 21280757,
 		startTransferReference: 22678761,
 		startSavingsReferal: 22536327,
-		startCCIP: 22623046,
+		startCCIP: 22623055,
 		startUniswapPoolV3: 19122801,
 	},
 
