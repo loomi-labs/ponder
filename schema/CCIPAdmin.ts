@@ -11,6 +11,8 @@ export const CCIPAdminProposal = onchainTable(
 		status: t.text().notNull(), // 'Pending' | 'Denied' | 'Enacted'
 		details: t.text(),
 		created: t.bigint().notNull(),
+		deniedAt: t.bigint(),
+		enactedAt: t.bigint(),
 	}),
 	(table) => ({
 		pk: primaryKey({ columns: [table.chainId, table.hash] }),
@@ -30,6 +32,7 @@ export const CCIPAdminChain = onchainTable(
 		inboundEnabled: t.boolean().notNull(),
 		inboundCapacity: t.bigint().notNull(),
 		inboundRate: t.bigint().notNull(),
+		rateLimitUpdatedAt: t.bigint(),
 	}),
 	(table) => ({
 		pk: primaryKey({ columns: [table.chainId, table.remoteChainSelector] }),

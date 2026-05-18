@@ -56,12 +56,14 @@ ponder.on('CCIPAdmin:AdminTransferProposed', async ({ event, context }) => {
 ponder.on('CCIPAdmin:ProposalDenied', async ({ event, context }) => {
 	await context.db.update(CCIPAdminProposal, { chainId: context.chain.id, hash: event.args.hash }).set({
 		status: 'Denied',
+		deniedAt: event.block.timestamp,
 	});
 });
 
 ponder.on('CCIPAdmin:ProposalEnacted', async ({ event, context }) => {
 	await context.db.update(CCIPAdminProposal, { chainId: context.chain.id, hash: event.args.hash }).set({
 		status: 'Enacted',
+		enactedAt: event.block.timestamp,
 	});
 });
 
@@ -113,5 +115,6 @@ ponder.on('CCIPAdmin:RateLimit', async ({ event, context }) => {
 			inboundEnabled: inboundConfigs.isEnabled,
 			inboundCapacity: inboundConfigs.capacity,
 			inboundRate: inboundConfigs.rate,
+			rateLimitUpdatedAt: event.block.timestamp,
 		});
 });
