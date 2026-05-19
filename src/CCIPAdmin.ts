@@ -14,6 +14,7 @@ ponder.on('CCIPAdmin:ProposalMade', async ({ event, context }) => {
 		deadline: BigInt(deadline),
 		status: 'Pending',
 		created: event.block.timestamp,
+		txHash: event.transaction.hash,
 	});
 });
 
@@ -57,6 +58,7 @@ ponder.on('CCIPAdmin:ProposalDenied', async ({ event, context }) => {
 	await context.db.update(CCIPAdminProposal, { chainId: context.chain.id, hash: event.args.hash }).set({
 		status: 'Denied',
 		deniedAt: event.block.timestamp,
+		deniedTxHash: event.transaction.hash,
 	});
 });
 
@@ -64,6 +66,7 @@ ponder.on('CCIPAdmin:ProposalEnacted', async ({ event, context }) => {
 	await context.db.update(CCIPAdminProposal, { chainId: context.chain.id, hash: event.args.hash }).set({
 		status: 'Enacted',
 		enactedAt: event.block.timestamp,
+		enactedTxHash: event.transaction.hash,
 	});
 });
 
@@ -122,6 +125,7 @@ ponder.on('CCIPAdmin:RateLimit', async ({ event, context }) => {
 			inboundCapacity: inboundConfigs.capacity,
 			inboundRate: inboundConfigs.rate,
 			rateLimitUpdatedAt: event.block.timestamp,
+			rateLimitTxHash: event.transaction.hash,
 		})
 		.onConflictDoUpdate(() => ({
 			outboundEnabled: outboundConfig.isEnabled,
@@ -131,5 +135,6 @@ ponder.on('CCIPAdmin:RateLimit', async ({ event, context }) => {
 			inboundCapacity: inboundConfigs.capacity,
 			inboundRate: inboundConfigs.rate,
 			rateLimitUpdatedAt: event.block.timestamp,
+			rateLimitTxHash: event.transaction.hash,
 		}));
 });
