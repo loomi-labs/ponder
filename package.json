@@ -10,7 +10,9 @@
 		"codegen": "ponder codegen",
 		"lint": "eslint .",
 		"eslint-config-ponder": "workspace:*",
-		"typecheck": "tsc"
+		"typecheck": "tsc",
+		"infra:up": "docker stack deploy -c stack.testing.yml frankencoin-ponder",
+		"infra:down": "docker stack remove frankencoin-ponder"
 	},
 	"dependencies": {
 		"@frankencoin/zchf": "^0.3.21",
