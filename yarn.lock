@@ -1761,10 +1761,10 @@ pino@^8.16.2:
     sonic-boom "^3.7.0"
     thread-stream "^2.6.0"
 
-ponder@^0.16.3:
-  version "0.16.3"
-  resolved "https://registry.yarnpkg.com/ponder/-/ponder-0.16.3.tgz#36946b6c0e9f6824b8af8f8027215fc2552e7294"
-  integrity sha512-QwAg5eFUujWR87ZMeTTKmF17q9IVTew26tpdaTfQrrtJVf/oU8ZN1qu7ZcP2SPtK5oScblJMWQm9zfwst6tJcg==
+ponder@0.15.18:
+  version "0.15.18"
+  resolved "https://registry.yarnpkg.com/ponder/-/ponder-0.15.18.tgz#39e40d7a374b0bd3b8ec21dff1126431e4dad97c"
+  integrity sha512-QFfTq1j5ouWjnLuXUpWnzVUNn26ceHARboxHWKnS/z9AAq1P6tqfuA5VC/cvb9NJkezsNHC6OVbEXjyW3wJaLg==
   dependencies:
     "@babel/code-frame" "^7.23.4"
     "@commander-js/extra-typings" "^12.0.1"
