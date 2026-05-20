@@ -146,103 +146,6 @@ ponder.on('MintingHubV1:PositionOpened', async ({ event, context }) => {
 	});
 
 	// ------------------------------------------------------------------
-	// POSTGRES BACKFILL
-	if (process.env.DATABASE_URL) {
-		const receipt = await client.getTransactionReceipt({ hash: event.transaction.hash });
-		const positionNorm = normalizeAddress(position);
-		let ownerCount = 0n;
-		let mintCount = 0n;
-		let prevSize: bigint | undefined;
-		let prevPrice: bigint | undefined;
-		let prevMinted: bigint | undefined;
-
-		const OneMonth = 60 * 60 * 24 * 30;
-		const OneYear = 60 * 60 * 24 * 365;
-		const secToExp = Math.floor(Number(expiration) - Number(event.block.timestamp));
-		const feeTimeframe = Math.max(OneMonth, secToExp);
-		const feePPM = BigInt(Math.floor((feeTimeframe * annualInterestPPM) / OneYear));
-
-		for (const log of receipt.logs) {
-			if (normalizeAddress(log.address) !== positionNorm) continue;
-			const topic = log.topics[0];
-
-			if (topic === OWNERSHIP_TRANSFERRED_TOPIC) {
-				const t1 = log.topics[1];
-				const t2 = log.topics[2];
-				if (!t1 || !t2) continue;
-				ownerCount++;
-				await context.db
-					.insert(MintingHubV1OwnerTransfersV1)
-					.values({
-						version: 1,
-						position: positionNorm,
-						count: ownerCount,
-						created: event.block.timestamp,
-						previousOwner: normalizeAddress('0x' + t1.slice(26)),
-						newOwner: normalizeAddress('0x' + t2.slice(26)),
-						txHash: event.transaction.hash,
-					})
-					.onConflictDoNothing();
-			} else if (topic === MINTING_UPDATE_TOPIC_V1) {
-				const [size, logPrice, mintedAmt] = decodeAbiParameters(
-					[{ type: 'uint256' }, { type: 'uint256' }, { type: 'uint256' }, { type: 'uint256' }],
-					log.data
-				);
-				mintCount++;
-				const sizeAdjusted = prevSize !== undefined ? size - prevSize : size;
-				const priceAdjusted = prevPrice !== undefined ? logPrice - prevPrice : logPrice;
-				const mintedAdjusted = prevMinted !== undefined ? mintedAmt - prevMinted : mintedAmt;
-				await context.db
-					.insert(MintingHubV1MintingUpdateV1)
-					.values({
-						count: mintCount,
-						txHash: event.transaction.hash,
-						created: event.block.timestamp,
-						position: positionNorm,
-						owner: normalizeAddress(owner),
-						isClone,
-						collateral: normalizeAddress(collateral),
-						collateralName,
-						collateralSymbol,
-						collateralDecimals,
-						size,
-						price: logPrice,
-						minted: mintedAmt,
-						sizeAdjusted,
-						priceAdjusted,
-						mintedAdjusted,
-						annualInterestPPM,
-						reserveContribution,
-						feeTimeframe,
-						feePPM: parseInt(feePPM.toString()),
-						feePaid: mintedAdjusted > 0n ? (feePPM * mintedAdjusted) / 1_000_000n : 0n,
-					})
-					.onConflictDoNothing();
-				prevSize = size;
-				prevPrice = logPrice;
-				prevMinted = mintedAmt;
-			}
-		}
-
-		if (ownerCount > 0n || mintCount > 0n) {
-			await context.db
-				.insert(MintingHubV1Status)
-				.values({
-					position: positionNorm,
-					ownerTransfersCounter: ownerCount,
-					mintingUpdatesCounter: mintCount,
-					challengeStartedCounter: 0n,
-					challengeAvertedBidsCounter: 0n,
-					challengeSucceededBidsCounter: 0n,
-				})
-				.onConflictDoUpdate((current) => ({
-					ownerTransfersCounter: current.ownerTransfersCounter > ownerCount ? current.ownerTransfersCounter : ownerCount,
-					mintingUpdatesCounter: current.mintingUpdatesCounter > mintCount ? current.mintingUpdatesCounter : mintCount,
-				}));
-		}
-	}
-
-	// ------------------------------------------------------------------
 	// COMMON
 
 	await context.db
@@ -284,7 +187,12 @@ ponder.on('MintingHubV1:ChallengeStarted', async ({ event, context }) => {
 	const { MintingHubV1 } = context.contracts;
 
 	const [challenges, period, liqPrice] = await Promise.all([
-		client.readContract({ abi: MintingHubV1.abi, address: MintingHubV1.address, functionName: 'challenges', args: [event.args.number] }),
+		client.readContract({
+			abi: MintingHubV1.abi,
+			address: MintingHubV1.address,
+			functionName: 'challenges',
+			args: [event.args.number],
+		}),
 		client.readContract({ abi: PositionV1ABI, address: event.args.position, functionName: 'challengePeriod' }),
 		client.readContract({ abi: PositionV1ABI, address: event.args.position, functionName: 'price' }),
 	]);
@@ -341,7 +249,12 @@ ponder.on('MintingHubV1:ChallengeAverted', async ({ event, context }) => {
 	const { MintingHubV1 } = context.contracts;
 
 	const [challenges, cooldown, liqPrice, challenge] = await Promise.all([
-		client.readContract({ abi: MintingHubV1.abi, address: MintingHubV1.address, functionName: 'challenges', args: [event.args.number] }),
+		client.readContract({
+			abi: MintingHubV1.abi,
+			address: MintingHubV1.address,
+			functionName: 'challenges',
+			args: [event.args.number],
+		}),
 		client.readContract({ abi: PositionV1ABI, address: event.args.position, functionName: 'cooldown' }),
 		client.readContract({ abi: PositionV1ABI, address: event.args.position, functionName: 'price' }),
 		context.db.find(MintingHubV1ChallengeV1, { position: normalizeAddress(event.args.position), number: event.args.number }),
@@ -412,7 +325,12 @@ ponder.on('MintingHubV1:ChallengeSucceeded', async ({ event, context }) => {
 	const { MintingHubV1 } = context.contracts;
 
 	const [challenges, cooldown, challenge] = await Promise.all([
-		client.readContract({ abi: MintingHubV1.abi, address: MintingHubV1.address, functionName: 'challenges', args: [event.args.number] }),
+		client.readContract({
+			abi: MintingHubV1.abi,
+			address: MintingHubV1.address,
+			functionName: 'challenges',
+			args: [event.args.number],
+		}),
 		client.readContract({ abi: PositionV1ABI, address: event.args.position, functionName: 'cooldown' }),
 		context.db.find(MintingHubV1ChallengeV1, { position: normalizeAddress(event.args.position), number: event.args.number }),
 	]);
