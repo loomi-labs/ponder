@@ -22,3 +22,6 @@ yarn-error.log*
 
 # Backups
 /scripts/*.dump
+
+# Claude Code
+/.claude/scheduled_tasks.lock
