@@ -7,46 +7,10 @@ import {
 	MintingHubV2Status,
 	PositionAggregatesV2,
 } from 'ponder:schema';
-import { Address } from 'viem';
 import { mainnet } from 'viem/chains';
 import { and, eq, gt } from 'ponder';
 import { normalizeAddress } from './utils/format';
-
-const CLONE_HELPER = normalizeAddress(ADDRESS[mainnet.id].cloneHelper);
-// keccak256("OwnershipTransferred(address,address)")
-const OWNERSHIP_TRANSFERRED_TOPIC = '0x8be0079c531659141344cd1fd0a4f28419497f9722a3daafe3b4186f6b6457e0' as const;
-
-/**
- * If a MintingUpdate originates from a CloneHelper tx, the position's owner in the DB is still
- * the CloneHelper (the 0x0→CloneHelper OwnershipTransferred log was already processed, but the
- * CloneHelper→beneficiary transfer log comes later in the same tx).
- * We fetch the receipt and find that second transfer to recover the actual beneficiary.
- */
-async function resolvePositionOwner(
-	owner: Address,
-	positionAddress: Address,
-	txHash: `0x${string}`,
-	client: Context['client']
-): Promise<Address> {
-	if (owner !== CLONE_HELPER) return owner;
-
-	const receipt = await client.getTransactionReceipt({ hash: txHash });
-
-	for (const log of receipt.logs) {
-		if (
-			normalizeAddress(log.address) === positionAddress &&
-			log.topics[0] === OWNERSHIP_TRANSFERRED_TOPIC &&
-			log.topics[1] !== undefined &&
-			log.topics[2] !== undefined &&
-			normalizeAddress(('0x' + log.topics[1].slice(26)) as Address) === CLONE_HELPER
-		) {
-			return normalizeAddress(('0x' + log.topics[2].slice(26)) as Address);
-		}
-	}
-
-	return owner;
-}
-
+import { resolvePositionOwner } from './utils/ownership';
 /*
 Events
 
@@ -144,13 +108,6 @@ ponder.on('PositionV2:MintingUpdate', async ({ event, context }) => {
 			mintingUpdatesCounter: current.mintingUpdatesCounter + 1n,
 		}));
 
-	const resolvedOwner = await resolvePositionOwner(
-		normalizeAddress(position.owner),
-		normalizeAddress(positionAddress),
-		event.transaction.hash,
-		context.client
-	);
-
 	const annualInterestPPM = baseRatePPM + position.riskPremiumPPM;
 	const isClone = normalizeAddress(position.original) !== normalizeAddress(position.position);
 
@@ -158,6 +115,13 @@ ponder.on('PositionV2:MintingUpdate', async ({ event, context }) => {
 	const feeTimeframe = Math.floor(parseInt(position.expiration.toString()) - parseInt(event.block.timestamp.toString()));
 	const feePPM = BigInt(Math.floor((feeTimeframe * annualInterestPPM) / OneYear));
 	const getFeePaid = (amount: bigint): bigint => (feePPM * amount) / 1_000_000n;
+
+	const resolvedOwner = await resolvePositionOwner(
+		normalizeAddress(position.owner),
+		normalizeAddress(positionAddress),
+		event.transaction.hash,
+		client
+	);
 
 	const sharedFields = {
 		txHash: event.transaction.hash,
@@ -244,15 +208,18 @@ ponder.on('PositionV2:OwnershipTransferred', async ({ event, context }) => {
 		context.db.find(MintingHubV2PositionV2, { position: normalizeAddress(event.log.address) }),
 	]);
 
-	await context.db.insert(MintingHubV2OwnerTransfersV2).values({
-		version: 2,
-		position: normalizeAddress(event.log.address),
-		count: status.ownerTransfersCounter,
-		created: event.block.timestamp,
-		previousOwner: normalizeAddress(event.args.previousOwner),
-		newOwner: normalizeAddress(event.args.newOwner),
-		txHash: event.transaction.hash,
-	});
+	await context.db
+		.insert(MintingHubV2OwnerTransfersV2)
+		.values({
+			version: 2,
+			position: normalizeAddress(event.log.address),
+			count: status.ownerTransfersCounter,
+			created: event.block.timestamp,
+			previousOwner: normalizeAddress(event.args.previousOwner),
+			newOwner: normalizeAddress(event.args.newOwner),
+			txHash: event.transaction.hash,
+		})
+		.onConflictDoNothing();
 
 	if (position) {
 		await context.db

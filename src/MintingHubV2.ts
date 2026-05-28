@@ -1,13 +1,18 @@
-import { ERC20ABI } from '@frankencoin/zchf';
+import { ADDRESS, ERC20ABI, SavingsV2ABI } from '@frankencoin/zchf';
 import { ponder } from 'ponder:registry';
 import {
 	CommonEcosystem,
 	MintingHubV2ChallengeBidV2,
 	MintingHubV2ChallengeV2,
+	MintingHubV2MintingUpdateV2,
+	MintingHubV2OwnerTransfersV2,
 	MintingHubV2PositionV2,
 	MintingHubV2Status,
 } from 'ponder:schema';
+import { decodeAbiParameters } from 'viem';
+import { mainnet } from 'viem/chains';
 import { normalizeAddress } from './utils/format';
+import { MINTING_UPDATE_TOPIC_V2, OWNERSHIP_TRANSFERRED_TOPIC, resolvePositionOwner } from './utils/ownership';
 
 /*
 Events
@@ -112,9 +117,13 @@ ponder.on('MintingHubV2:PositionOpened', async ({ event, context }) => {
 	// ------------------------------------------------------------------
 	// ------------------------------------------------------------------
 	// Create position entry for DB
+	// When a position is opened via CloneHelper, event.args.owner is still the
+	// CloneHelper address. Resolve to the actual beneficiary before storing.
+	const resolvedOwner = await resolvePositionOwner(normalizeAddress(owner), normalizeAddress(position), event.transaction.hash, client);
+
 	await context.db.insert(MintingHubV2PositionV2).values({
 		position: normalizeAddress(position),
-		owner,
+		owner: resolvedOwner,
 		zchf,
 		collateral,
 		price,

@@ -1,4 +1,5 @@
 export * from './schema/BridgedAccounting';
+export * from './schema/CCIPAdmin';
 export * from './schema/Common';
 export * from './schema/Equity';
 export * from './schema/ERC20';
